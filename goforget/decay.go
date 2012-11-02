@@ -16,11 +16,17 @@ func factorial(n int) int {
 
 func Poisson(lambda float64) int {
 	rand.Seed(time.Now().UnixNano())
+	if lambda == 0.0 {
+		return 0
+	}
 	r := rand.Float64()
 	k := int(0)
 	e := math.Exp(-1.0 * lambda)
-	for p := 0.0; p < r; k += 1 {
-		p += e * math.Pow(lambda, float64(k)) / float64(factorial(k))
+	p := e
+	for p < r {
+		k += 1
+		e *= lambda / float64(k)
+		p += e
 	}
 	return k
 }
