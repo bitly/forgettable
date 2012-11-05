@@ -6,14 +6,6 @@ import (
 	"time"
 )
 
-func factorial(n int) int {
-	f := int(1)
-	for ; n > 1; n -= 1 {
-		f *= n
-	}
-	return f
-}
-
 func Poisson(lambda float64) int {
 	rand.Seed(time.Now().UnixNano())
 	if lambda == 0.0 {
@@ -43,7 +35,7 @@ func Decay(count, Z, t int, rate float64) (int, int) {
 	k := Poisson(lambda)
 
 	if k > count {
-		k = count
+		k = count - 1
 	}
 
 	count, Z = count-k, Z-k

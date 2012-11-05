@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"github.com/garyburd/redigo/redis"
@@ -24,21 +23,17 @@ var rdb redis.Conn
 var rLock sync.RWMutex
 var updateChan chan *Distribution
 
-type SingleResult struct {
-	Distribution string  `json:"distribution"`
-	Field        string  `json:"field"`
-	Count        int     `json:"count"`
-	Z            int     `json:"Z"`
-	Probability  float64 `json:"probability"`
-	Rate         float64 `json:"rate"`
+type Value struct {
+	Count int     `json:"count"`
+	P     float64 `json:"p"`
 }
 
 type Distribution struct {
 	Name string `json:"distribution"`
 	Z    int    `json:"Z"`
 	T    int
-	Data map[string]int `json:"data"`
-	Rate float64        `json:"rate"`
+	Data map[string]*Value `json:"data"`
+	Rate float64           `json:"rate"`
 }
 
 func (d *Distribution) Fill() error {
@@ -51,7 +46,7 @@ func (d *Distribution) Fill() error {
 	}
 
 	// TODO: don't use the dist map to speed things up!
-	d.Data = make(map[string]int)
+	d.Data = make(map[string]*Value)
 	d.Z = 0
 	for i := 0; i < len(data); i += 2 {
 		k, err := redis.String(data[i], nil)
@@ -74,10 +69,15 @@ func (d *Distribution) Fill() error {
 			} else if k == "_T" {
 				d.T = v
 			} else {
-				d.Data[k] = v
+				d.Data[k] = &Value{Count: v}
 				d.Z += v
 			}
 		}
+	}
+
+	fZ := float64(d.Z)
+	for idx, _ := range d.Data {
+		d.Data[idx].P = float64(d.Data[idx].Count) / fZ
 	}
 
 	return nil
@@ -86,9 +86,16 @@ func (d *Distribution) Fill() error {
 func (d *Distribution) Decay() {
 	newZ := 0
 	for k, v := range d.Data {
-		d.Data[k], d.Z = Decay(v, d.Z, d.T, d.Rate)
-		newZ += d.Data[k]
+		d.Data[k].Count, d.Z = Decay(v.Count, d.Z, d.T, d.Rate)
+		newZ += d.Data[k].Count
 	}
+
+	fNewZ := float64(newZ)
+	for idx, _ := range d.Data {
+		d.Data[idx].P = float64(d.Data[idx].Count) / fNewZ
+	}
+
+	d.Z = newZ
 	d.T = int(time.Now().Unix())
 }
 
@@ -144,17 +151,17 @@ func ConnectRedis() redis.Conn {
 func IncrHandler(w http.ResponseWriter, r *http.Request) {
 	reqParams, err := url.ParseQuery(r.URL.RawQuery)
 	if err != nil {
-		fmt.Fprintf(w, "Error decoding request URI: %s\n", r.URL.RawQuery)
+		HttpError(w, 500, "INVALID_URI")
 		return
 	}
 	distribution := reqParams.Get("distribution")
 	if distribution == "" {
-		fmt.Fprintf(w, "Missing required parameter 'distribution'\n")
+		HttpError(w, 500, "MISSING_ARG_DISTRIBUTION")
 		return
 	}
 	field := reqParams.Get("field")
 	if field == "" {
-		fmt.Fprintf(w, "Missing required parameter 'field'\n")
+		HttpError(w, 500, "MISSING_ARG_FIELD")
 		return
 	}
 	N_raw := reqParams.Get("N")
@@ -164,7 +171,7 @@ func IncrHandler(w http.ResponseWriter, r *http.Request) {
 	} else {
 		N, err = strconv.Atoi(N_raw)
 		if err != nil {
-			fmt.Fprintf(w, "Could not parse field 'N': %s", err)
+			HttpError(w, 500, "COULDNT_PARSE_N")
 			return
 		}
 	}
@@ -178,8 +185,10 @@ func IncrHandler(w http.ResponseWriter, r *http.Request) {
 	rLock.Unlock()
 
 	if err == nil {
+		w.WriteHeader(200)
 		fmt.Fprintf(w, "OK")
 	} else {
+		w.WriteHeader(500)
 		fmt.Fprintf(w, "FAIL")
 	}
 	updateChan <- &Distribution{Name: distribution}
@@ -188,12 +197,12 @@ func IncrHandler(w http.ResponseWriter, r *http.Request) {
 func DistHandler(w http.ResponseWriter, r *http.Request) {
 	reqParams, err := url.ParseQuery(r.URL.RawQuery)
 	if err != nil {
-		fmt.Fprintf(w, "Error decoding request URI: %s\n", r.URL.RawQuery)
+		HttpError(w, 500, "INVALID_URI")
 		return
 	}
 	distribution := reqParams.Get("distribution")
 	if distribution == "" {
-		fmt.Fprintf(w, "Missing required parameter 'distribution'\n")
+		HttpError(w, 500, "MISSING_ARG_DISTRIBUTION")
 		return
 	}
 	var rate float64
@@ -203,46 +212,44 @@ func DistHandler(w http.ResponseWriter, r *http.Request) {
 	} else {
 		n, err := fmt.Fscan(strings.NewReader(rate_raw), &rate)
 		if n == 0 || err != nil {
-			fmt.Fprintf(w, "Could not parse 'rate' field: %s", err)
+			HttpError(w, 500, "CANNOT_PARSE_RATE")
+			return
 		}
 	}
 
 	dist := Distribution{Name: distribution}
 	err = dist.Fill()
 	if err != nil {
-		fmt.Fprintf(w, "Error retrieving distribution %s: %s", distribution, err)
+		HttpError(w, 500, "COULD_NOT_RETRIEVE_DISTRIBUTION")
 		return
 	}
 
-	if dist.Rate == *defaultRate {
-		dist.Rate = rate
+	if len(dist.Data) != 0 {
+		if dist.Rate == *defaultRate {
+			dist.Rate = rate
+		}
+
+		dist.Decay()
 	}
 
-	dist.Decay()
-	j, err := json.Marshal(dist)
-	if err != nil {
-		fmt.Fprintf(w, "Error formatting result: %s", err)
-	} else {
-		fmt.Fprintf(w, "%s", j)
-	}
-
+	HttpResponse(w, 200, dist)
 	updateChan <- &dist
 }
 
 func GetHandler(w http.ResponseWriter, r *http.Request) {
 	reqParams, err := url.ParseQuery(r.URL.RawQuery)
 	if err != nil {
-		fmt.Fprintf(w, "Error decoding request URI: %s\n", r.URL.RawQuery)
+		HttpError(w, 500, "INVALID_URI")
 		return
 	}
 	distribution := reqParams.Get("distribution")
 	if distribution == "" {
-		fmt.Fprintf(w, "Missing required parameter 'distribution'\n")
+		HttpError(w, 500, "MISSING_ARG_DISTRIBUTION")
 		return
 	}
 	field := reqParams.Get("field")
 	if field == "" {
-		fmt.Fprintf(w, "Missing required parameter 'field'\n")
+		HttpError(w, 500, "MISSING_ARG_FIELD")
 		return
 	}
 	var rate float64
@@ -252,7 +259,8 @@ func GetHandler(w http.ResponseWriter, r *http.Request) {
 	} else {
 		n, err := fmt.Fscan(strings.NewReader(rate_raw), &rate)
 		if n == 0 || err != nil {
-			fmt.Fprintf(w, "Could not parse 'rate' field: %s", err)
+			HttpError(w, 500, "CANNOT_PARSE_RATE")
+			return
 		}
 	}
 
@@ -261,37 +269,32 @@ func GetHandler(w http.ResponseWriter, r *http.Request) {
 	rLock.RUnlock()
 
 	if err != nil || len(data) != 3 {
-		fmt.Fprintf(w, "Error retrieving field %s: %s", field, err)
-	} else {
-		count, _ := redis.Int(data[0], nil)
-		Z, _ := redis.Int(data[1], nil)
-		t, _ := redis.Int(data[2], nil)
-
-		count, Z = Decay(count, Z, t, rate)
-		var p float64
-		if Z == 0 {
-			p = 0.0
-		} else {
-			p = float64(count) / float64(Z)
-		}
-
-		result := SingleResult{
-			Distribution: distribution,
-			Field:        field,
-			Count:        count,
-			Z:            Z,
-			Probability:  p,
-			Rate:         rate,
-		}
-		j, err := json.Marshal(result)
-		if err != nil {
-			fmt.Fprintf(w, "Error formatting result: %s", err)
-		} else {
-			fmt.Fprintf(w, "%s", j)
-		}
-
-		updateChan <- &Distribution{Name: distribution}
+		HttpError(w, 500, "COULD_NOT_RETRIEVE_FIELD")
+		return
 	}
+
+	count, _ := redis.Int(data[0], nil)
+	Z, _ := redis.Int(data[1], nil)
+	t, _ := redis.Int(data[2], nil)
+
+	count, Z = Decay(count, Z, t, rate)
+	var p float64
+	if Z == 0 {
+		p = 0.0
+	} else {
+		p = float64(count) / float64(Z)
+	}
+
+	result := Distribution{
+		Name: distribution,
+		Z:    Z,
+		T:    t,
+		Data: map[string]*Value{field: &Value{Count: count, P: p}},
+		Rate: rate,
+	}
+
+	HttpResponse(w, 200, result)
+	updateChan <- &result
 }
 
 func main() {
