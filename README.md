@@ -5,4 +5,4 @@ Forget-Table is a database for storing non-stationary categorical distributions 
 
 Forget-Table has been designed to store millions of categoricals, and can be written into many thousands of times a second.
 
-Forget-Table is written using a Redis backend. There are C, go and Python implementations.
+Forget-Table is written using a Redis backend. There are C, go and Python implementations (though the C version doesn't work yet!).
