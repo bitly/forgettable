@@ -3,19 +3,21 @@ package main
 import (
 	"flag"
 	"fmt"
+	"github.com/garyburd/redigo/redis"
 	"log"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
-	"github.com/garyburd/redigo/redis"
 )
 
 var (
-    httpAddress = flag.String("http", ":8080", "HTTP service address (e.g., ':8080')")
+	httpAddress = flag.String("http", ":8080", "HTTP service address (e.g., ':8080')")
 	redisHost   = flag.String("redis-host", "", "Redis host in the form host:port:db.")
 	defaultRate = flag.Float64("default-rate", 0.5, "Default rate to decay distributions with")
 	nWorkers    = flag.Int("nworkers", 1, "Number of update workers that update the redis DB")
+	pruneDist   = flag.Bool("prune", true, "Whether or not to decay distributional fields out")
+	expirSigma  = flag.Float64("expire-sigma", 2, "Confidence level that a distribution will be empty when set to expire")
 )
 
 var updateChan chan *Distribution
@@ -48,7 +50,7 @@ func IncrHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-    err = IncrField(distribution, field, N)
+	err = IncrField(distribution, field, N)
 	if err == nil {
 		w.WriteHeader(200)
 		fmt.Fprintf(w, "OK")
@@ -82,20 +84,23 @@ func DistHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	dist := Distribution{Name: distribution}
+	dist := Distribution{
+		Name:  distribution,
+		Prune: *pruneDist,
+	}
 	err = dist.Fill()
 	if err != nil {
 		HttpError(w, 500, "COULD_NOT_RETRIEVE_DISTRIBUTION")
 		return
 	}
 
-    if len(dist.Data) != 0 {
-	    if dist.Rate == *defaultRate {
-	    	dist.Rate = rate
-	    }
+	if len(dist.Data) != 0 {
+		if dist.Rate == *defaultRate {
+			dist.Rate = rate
+		}
 
-	    dist.Decay()
-    }
+		dist.Decay()
+	}
 
 	HttpResponse(w, 200, dist)
 	updateChan <- &dist
@@ -129,7 +134,7 @@ func GetHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-    data, err := GetField(distribution, field)
+	data, err := GetField(distribution, field)
 
 	if err != nil || len(data) != 3 {
 		HttpError(w, 500, "COULD_NOT_RETRIEVE_FIELD")
@@ -140,7 +145,16 @@ func GetHandler(w http.ResponseWriter, r *http.Request) {
 	Z, _ := redis.Int(data[1], nil)
 	t, _ := redis.Int(data[2], nil)
 
-	count, Z = Decay(count, Z, t, rate)
+	l := Decay(count, Z, t, rate)
+	if l >= count {
+		if *pruneDist {
+			l = count
+		} else {
+			l = count - 1
+		}
+	}
+	count, Z = count-l, Z-l
+
 	var p float64
 	if Z == 0 {
 		p = 0.0
@@ -148,13 +162,14 @@ func GetHandler(w http.ResponseWriter, r *http.Request) {
 		p = float64(count) / float64(Z)
 	}
 
-    result := Distribution{
-        Name: distribution,
-        Z: Z,
-        T: t,
-        Data: map[string]*Value{field:&Value{Count:count, P:p}},
-        Rate: rate,
-    }
+	result := Distribution{
+		Name:  distribution,
+		Z:     Z,
+		T:     t,
+		Data:  map[string]*Value{field: &Value{Count: count, P: p}},
+		Rate:  rate,
+		Prune: *pruneDist,
+	}
 
 	HttpResponse(w, 200, result)
 	updateChan <- &result
@@ -163,13 +178,13 @@ func GetHandler(w http.ResponseWriter, r *http.Request) {
 func main() {
 	flag.Parse()
 
-    err := ConnectRedis(*redisHost)
-    if err != nil {
-        log.Printf("Could not connect to redis host: %s: %s", *redisHost, err)
-        return
-    } else {
-	    log.Printf("Connected to %s", *redisHost)
-    }
+	err := ConnectRedis(*redisHost)
+	if err != nil {
+		log.Printf("Could not connect to redis host: %s: %s", *redisHost, err)
+		return
+	} else {
+		log.Printf("Connected to %s", *redisHost)
+	}
 
 	log.Printf("Starting %d update workers", *nWorkers)
 	updateChan = make(chan *Distribution, 10) //25 * *nWorkers)
