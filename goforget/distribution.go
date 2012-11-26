@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"github.com/garyburd/redigo/redis"
 	"log"
-	"strings"
 	"time"
 )
 
@@ -32,36 +31,30 @@ func (d *Distribution) Fill() error {
 	// TODO: don't use the dist map to speed things up!
 	d.Data = make(map[string]*Value)
 	d.Z = 0
-	foundRate := false
-	for i := 0; i < len(data); i += 2 {
-		k, err := redis.String(data[i], nil)
-		if err != nil || k == "" {
-			log.Printf("Could not read %s from distribution %s: %s", data[i], d.Name, err)
-		}
-		if k == "_R" {
-			var rate float64
-			n, err := fmt.Fscan(strings.NewReader(data[i+1].(string)), &rate)
-			if n == 1 && err == nil {
-				d.Rate = rate
-				foundRate = true
-			}
-		} else {
-			v, err := redis.Int(data[i+1], nil)
-			if err != nil {
-				log.Printf("Could not read %s from distribution %s: %s", data[i+1], d.Name, err)
-			}
-			if k == "_Z" {
-				continue
-			} else if k == "_T" {
-				d.T = v
-			} else {
-				d.Data[k] = &Value{Count: v}
-				d.Z += v
-			}
-		}
+	d.Rate = *defaultRate
+
+	if data[0] == nil {
+		return nil
 	}
-	if !foundRate {
-		d.Rate = *defaultRate
+
+	T, err := redis.Int(data[0], nil)
+	if err != nil {
+		log.Printf("Could not read _T from distribution %s: %s", d.Name, err)
+	}
+	d.T = T
+
+	distData, _ := redis.MultiBulk(data[1], nil)
+	for i := 0; i < len(distData); i += 2 {
+		k, err := redis.String(distData[i], nil)
+		if err != nil || k == "" {
+			log.Printf("Could not read %s from distribution %s: %s", distData[i], d.Name, err)
+		}
+		v, err := redis.Int(distData[i+1], nil)
+		if err != nil {
+			log.Printf("Could not read %s from distribution %s: %s", distData[i+1], d.Name, err)
+		}
+		d.Data[k] = &Value{Count: v}
+		d.Z += v
 	}
 
 	fZ := float64(d.Z)

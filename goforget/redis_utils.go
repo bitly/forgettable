@@ -35,22 +35,27 @@ func UpdateRedis(readChan chan *Distribution) {
 		rdb.Send("MULTI")
 		for k, v := range dist.Data {
 			if v.Count == 0 {
-				rdb.Send("HDEL", dist.Name, k)
+				rdb.Send("ZREM", dist.Name, k)
 			} else {
-				rdb.Send("HSET", dist.Name, k, v.Count)
+				rdb.Send("ZADD", dist.Name, v.Count, k)
 				if v.Count > maxCount {
 					maxCount = v.Count
 				}
 			}
 		}
 
-		rdb.Send("HSET", dist.Name, "_Z", dist.Z)
-		rdb.Send("HSET", dist.Name, "_T", dist.T)
+		ZName := fmt.Sprintf("%s.%s", dist.Name, "_Z")
+		TName := fmt.Sprintf("%s.%s", dist.Name, "_T")
+
+		rdb.Send("SET", ZName, dist.Z)
+		rdb.Send("SET", TName, dist.T)
 
 		eta := math.Sqrt(float64(maxCount) / dist.Rate)
-		expTime := ((*expirSigma) + eta) * eta
+		expTime := int(((*expirSigma) + eta) * eta)
 
 		rdb.Send("EXPIRE", dist.Name, expTime)
+		rdb.Send("EXPIRE", ZName, expTime)
+		rdb.Send("EXPIRE", TName, expTime)
 
 		_, err := rdb.Do("EXEC")
 		rLock.Unlock()
@@ -62,7 +67,11 @@ func UpdateRedis(readChan chan *Distribution) {
 
 func GetField(distribution, field string) ([]interface{}, error) {
 	rLock.RLock()
-	data, err := redis.MultiBulk(rdb.Do("HMGET", distribution, field, "_Z", "_T"))
+	rdb.Send("MULTI")
+	rdb.Send("ZSCORE", distribution, field)
+	rdb.Send("GET", fmt.Sprintf("%s.%s", distribution, "_Z"))
+	rdb.Send("GET", fmt.Sprintf("%s.%s", distribution, "_T"))
+	data, err := redis.MultiBulk(rdb.Do("EXEC"))
 	rLock.RUnlock()
 	return data, err
 }
@@ -70,9 +79,9 @@ func GetField(distribution, field string) ([]interface{}, error) {
 func IncrField(distribution, field string, N int) error {
 	rLock.Lock()
 	rdb.Send("MULTI")
-	rdb.Send("HINCRBY", distribution, field, N)
-	rdb.Send("HINCRBY", distribution, "_Z", N)
-	rdb.Send("HSETNX", distribution, "_T", int(time.Now().Unix()))
+	rdb.Send("ZINCRBY", distribution, N, field)
+	rdb.Send("INCRBY", fmt.Sprintf("%s.%s", distribution, "_Z"), N)
+	rdb.Send("SETNX", fmt.Sprintf("%s.%s", distribution, "_T"), int(time.Now().Unix()))
 	_, err := rdb.Do("EXEC")
 	rLock.Unlock()
 	return err
@@ -80,7 +89,10 @@ func IncrField(distribution, field string, N int) error {
 
 func GetDistribution(distribution string) ([]interface{}, error) {
 	rLock.RLock()
-	data, err := redis.MultiBulk(rdb.Do("HGETALL", distribution))
+	rdb.Send("MULTI")
+	rdb.Send("GET", fmt.Sprintf("%s.%s", distribution, "_T"))
+	rdb.Send("ZRANGE", distribution, 0, -1, "WITHSCORES")
+	data, err := redis.MultiBulk(rdb.Do("EXEC"))
 	rLock.RUnlock()
 	return data, err
 }

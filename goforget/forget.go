@@ -100,10 +100,10 @@ func DistHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		dist.Decay()
+		updateChan <- &dist
 	}
 
 	HttpResponse(w, 200, dist)
-	updateChan <- &dist
 }
 
 func GetHandler(w http.ResponseWriter, r *http.Request) {
