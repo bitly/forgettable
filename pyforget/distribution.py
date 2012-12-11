@@ -45,6 +45,9 @@ class Distribution(object):
         return str(dict(zip(self.keys,self.values)))
 
     def decrement(self):
+        # check this distribution exists to decrement
+        if r.get(self.k) is None:
+            raise KeyError('Cannot find distribution in Redis')
         # get the currently stored data
         self.keys, self.values = zip(*r.zrevrange(self.k,0,-1,withscores=True))
         self.z = r.get(self.k+"_z") 
@@ -68,8 +71,7 @@ class Distribution(object):
             # try to excute
             pipeline.execute()
         except redis.WatchError:
-            # try again if the watch complains
-            logging.critical("WATCH ERROR (but who really cares, right?)")
+            pass
 
     def get_dist(self):
         self.decrement()
@@ -78,5 +80,9 @@ class Distribution(object):
 
     def get_bin(self, bin):
         self.decrement()
-        return self.values[self.keys.index(bin)] / self.z
+        try:
+            out = self.values[self.keys.index(bin)] / self.z
+        except ValueError:
+            raise ValueError('bin not in distribution')
+        return out
 

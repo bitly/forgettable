@@ -36,19 +36,39 @@ class GetHandler(tornado.web.RequestHandler):
     def get(self):
         key = self.get_argument('key')
         bin = self.get_argument('bin')
-        self.finish({
-            "status_code":200,
-            "data":[{
-                "bin": bin,
-                "probability": Distribution(key).get_bin(bin)
-            }]
-        })
+        try:
+            self.finish({
+                "status_code":200,
+                "data":[{
+                    "bin": bin,
+                    "probability": Distribution(key).get_bin(bin)
+                }]
+            })
+        except ValueError:
+            self.finish({
+                "status_code":404,
+                "data":[],
+                "error_message": "Could not find bin in distribution"
+            })
+        except KeyError:
+            self.finish({
+                "status_code":404,
+                "data":[],
+                "error_message": "Could not find distribution in Forget Table"
+            })
 
 class DistHandler(tornado.web.RequestHandler):
     def get(self):
         key = self.get_argument('key')
-        dist = Distribution(key).get_dist()
-        self.finish({
+        try:
+            dist = Distribution(key).get_dist()
+        except KeyError:
+            return self.finish({
+                "status_code":404,
+                "data":[],
+                "error_message": "Could not find distribution in Forget Table"
+            })
+        return self.finish({
             "status_code":200,
             "data":[{
                 "bin":key, 
