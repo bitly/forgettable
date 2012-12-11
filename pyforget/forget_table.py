@@ -16,6 +16,7 @@ class Application(tornado.web.Application):
             (r"/ping$", PingHandler),
             (r"/incr$", IncrHandler),
             (r"/get$", GetHandler),
+            (r"/dist$", DistHandler),
         ]
         tornado.web.Application.__init__(self, handlers, **app_settings)
 
@@ -32,6 +33,18 @@ class IncrHandler(tornado.web.RequestHandler):
         Distribution(key).incr(bin)
 
 class GetHandler(tornado.web.RequestHandler):
+    def get(self):
+        key = self.get_argument('key')
+        bin = self.get_argument('bin')
+        self.finish({
+            "status_code":200,
+            "data":[{
+                "bin": bin,
+                "probability": Distribution(key).get_bin(bin)
+            }]
+        })
+
+class DistHandler(tornado.web.RequestHandler):
     def get(self):
         key = self.get_argument('key')
         dist = Distribution(key).get_dist()

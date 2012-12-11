@@ -76,3 +76,7 @@ class Distribution(object):
         normalised = dict([(k, v/self.z) for k,v in zip(self.keys, self.values)])
         return normalised
 
+    def get_bin(self, bin):
+        self.decrement()
+        return self.values[self.keys.index(bin)] / self.z
+
