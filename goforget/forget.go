@@ -175,6 +175,95 @@ func GetHandler(w http.ResponseWriter, r *http.Request) {
 	updateChan <- &result
 }
 
+func NMostProbableHandler(w http.ResponseWriter, r *http.Request) {
+	reqParams, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil {
+		HttpError(w, 500, "INVALID_URI")
+		return
+	}
+	distribution := reqParams.Get("distribution")
+	if distribution == "" {
+		HttpError(w, 500, "MISSING_ARG_DISTRIBUTION")
+		return
+	}
+	var rate float64
+	rate_raw := reqParams.Get("rate")
+	if rate_raw == "" {
+		rate = *defaultRate
+	} else {
+		n, err := fmt.Fscan(strings.NewReader(rate_raw), &rate)
+		if n == 0 || err != nil {
+			HttpError(w, 500, "CANNOT_PARSE_RATE")
+			return
+		}
+	}
+	N_raw := reqParams.Get("N")
+	var N int
+	if N_raw == "" {
+		N = 10
+	} else {
+		N, err = strconv.Atoi(N_raw)
+		if err != nil {
+			HttpError(w, 500, "INVALID_ARG_N")
+			return
+		}
+	}
+
+	data, err := GetNMostProbable(distribution, N)
+	if err != nil || len(data) != 3 {
+		HttpError(w, 500, "COULD_NOT_RETRIEVE_DISTRIBUTION")
+		return
+	}
+
+	counts, _ := redis.MultiBulk(data[0], nil)
+	Z, _ := redis.Int(data[1], nil)
+	t, _ := redis.Int(data[2], nil)
+
+	count_data := make(map[string]*Value)
+	for i := 0; i < len(counts); i += 2 {
+		key, _ := redis.String(counts[i], nil)
+		c, _ := redis.Int(counts[i+1], nil)
+		if key == "" || c == 0 {
+			log.Printf("Could not parse: %s - %s", counts[i], counts[i+1])
+			continue
+		}
+
+		l := Decay(c, Z, t, rate)
+		if l >= c {
+			if *pruneDist {
+				l = c
+			} else {
+				l = c - 1
+			}
+		}
+		c, Z = c-l, Z-l
+		count_data[key] = &Value{
+			Count: c,
+			P:     0.0,
+		}
+	}
+
+	Zeff := float64(Z)
+	if Zeff <= 0 {
+		Zeff = 1.0
+	}
+	for key, _ := range count_data {
+		count_data[key].P = float64(count_data[key].Count) / Zeff
+	}
+
+	result := Distribution{
+		Name:  distribution,
+		Z:     Z,
+		T:     t,
+		Data:  count_data,
+		Rate:  rate,
+		Prune: *pruneDist,
+	}
+
+	HttpResponse(w, 200, result)
+	updateChan <- &result
+}
+
 func main() {
 	flag.Parse()
 
@@ -195,5 +284,6 @@ func main() {
 	http.HandleFunc("/get", GetHandler)
 	http.HandleFunc("/incr", IncrHandler)
 	http.HandleFunc("/dist", DistHandler)
+	http.HandleFunc("/nmostprobable", NMostProbableHandler)
 	log.Fatal(http.ListenAndServe(*httpAddress, nil))
 }

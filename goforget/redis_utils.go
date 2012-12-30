@@ -17,22 +17,33 @@ func UpdateRedis(readChan chan *Distribution) {
 	var err error
 	for dist := range readChan {
 		log.Printf("Updating distribution: %s", dist.Name)
+
+		ZName := fmt.Sprintf("%s.%s", dist.Name, "_Z")
+		TName := fmt.Sprintf("%s.%s", dist.Name, "_T")
+		rdb.Send("WATCH", ZName)
+
 		if dist.Data == nil {
 			dist.Fill()
 			if err != nil {
 				log.Printf("Could not update %s: %s", dist.Name, err)
+				rdb.Send("UNWATCH")
+				rLock.Unlock()
 				continue
 			}
 			dist.Decay()
 		}
 
+		rLock.Lock()
+		rdb.Send("MULTI")
+
 		if dist.Z == 0 {
+			rdb.Send("UNWATCH")
+			rdb.Send("DISCARD")
+			rLock.Unlock()
 			continue
 		}
 
 		maxCount := 0
-		rLock.Lock()
-		rdb.Send("MULTI")
 		for k, v := range dist.Data {
 			if v.Count == 0 {
 				rdb.Send("ZREM", dist.Name, k)
@@ -43,9 +54,6 @@ func UpdateRedis(readChan chan *Distribution) {
 				}
 			}
 		}
-
-		ZName := fmt.Sprintf("%s.%s", dist.Name, "_Z")
-		TName := fmt.Sprintf("%s.%s", dist.Name, "_T")
 
 		rdb.Send("SET", ZName, dist.Z)
 		rdb.Send("SET", TName, dist.T)
@@ -69,6 +77,17 @@ func GetField(distribution, field string) ([]interface{}, error) {
 	rLock.RLock()
 	rdb.Send("MULTI")
 	rdb.Send("ZSCORE", distribution, field)
+	rdb.Send("GET", fmt.Sprintf("%s.%s", distribution, "_Z"))
+	rdb.Send("GET", fmt.Sprintf("%s.%s", distribution, "_T"))
+	data, err := redis.MultiBulk(rdb.Do("EXEC"))
+	rLock.RUnlock()
+	return data, err
+}
+
+func GetNMostProbable(distribution string, N int) ([]interface{}, error) {
+	rLock.RLock()
+	rdb.Send("MULTI")
+	rdb.Send("ZREVRANGEBYSCORE", distribution, "+INF", "-INF", "WITHSCORES", "LIMIT", 0, N)
 	rdb.Send("GET", fmt.Sprintf("%s.%s", distribution, "_Z"))
 	rdb.Send("GET", fmt.Sprintf("%s.%s", distribution, "_T"))
 	data, err := redis.MultiBulk(rdb.Do("EXEC"))
