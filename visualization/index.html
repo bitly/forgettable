@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<!--
+    This visualization shows how a distribution gets decayed to uniform
+    using a poisson based decay model.  This type of decay is implemented
+    in forgettable in order to store time relevant statistical models.
+
+    In this visualization, the blocks on the right (darker color)
+    represent the original distribution, while the blocks on the right 
+    (lighter color) are the decayed values.  The decay is currently
+    happening at a constant rate and the visualization can be reset by
+    reloading the page.
+
+    Learn more at: http://mynameisfiber.github.com/forgettable/
+-->
+<meta charset="utf-8">
+<style>
+
+body {
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  margin: auto;
+  position: relative;
+  text-align: center;
+}
+
+text {
+  font: 10px sans-serif;
+}
+
+.axis path,
+.axis line {
+  fill: none;
+  stroke: #000;
+  shape-rendering: crispEdges;
+}
+
+.description {
+    text-align: center;
+}
+
+.description p {
+    text-align: left;
+    margin: 10px auto;
+    width: 500px;
+    font: 16px sans-serif;
+}
+</style>
+
+<script src="d3.v3.min.js"></script>
+
+<body>
+    <a href="https://github.com/mynameisfiber/forgettable"><img style="position: absolute; top: 0; right: 0; border: 0;" src="https://s3.amazonaws.com/github/ribbons/forkme_right_red_aa0000.png" alt="Fork me on GitHub"></a>
+
+    <div id=vis></div>
+    <div class="description">
+        <p>
+        Above is a Gaussian distribution being decayed as it would in
+        forget table.  At every iteration of the decay algorithm, each
+        bin decays a certain number of elements, as given by a Poisson
+        process, and the distribution is renormalized.  This is 
+        visualized side-by-side with the original distribution for
+        comparison.
+        </p>
+
+        <p>
+        As you can see, this first "forgets" the less probable bins, ie:
+        the tails of the distribution, thus putting more weight on the
+        more probable events.  As the decay continues, the distribution
+        slowly approaches uniformity.
+        </p>
+
+        <p>
+        If we were to also have the distribution be non-stationary (ie:
+        update the distribution with new observations as the decay
+        process is happening), the decayed distribution would more closely
+        show <i>recent</i> probabilities.  As a result, the decaying
+        distribution shows us what we believe the probabilities on our
+        bins are considering recent data.
+        </p>
+    </div>
+</body>
+
+<script>
+function clone(obj){
+    if(obj == null || typeof(obj) != 'object')
+        return obj;
+
+    var temp = obj.constructor(); // changed
+
+    for(var key in obj)
+        temp[key] = clone(obj[key]);
+    return temp;
+}
+
+var n = 2, // number of layers
+    m = 58, // number of samples per layer
+    stack = d3.layout.stack(),
+    data= gaussian(m), 
+    layers = stack(d3.range(n).map(function() { return clone(data); })),
+    yGroupMax = d3.max(layers, function(layer) { return d3.max(layer, function(d) { return d.y; }); }),
+    Z = d3.sum(data, function(data) { return data.y; }),
+    origZ = d3.sum(data, function(data) { return data.y; });
+
+var margin = {top: 40, right: 10, bottom: 20, left: 10},
+    width = 960 - margin.left - margin.right,
+    height = 500 - margin.top - margin.bottom;
+
+var x = d3.scale.ordinal()
+    .domain(d3.range(m))
+    .rangeRoundBands([0, width], .08);
+
+var y = d3.scale.linear()
+    .domain([0, 0.5])
+    .range([height, 0]);
+
+var color = d3.scale.linear()
+    .domain([0, n - 1])
+    .range(["#aad", "#556"]);
+
+var xAxis = d3.svg.axis()
+    .scale(x)
+    .tickSize(0)
+    .tickPadding(6)
+    .orient("bottom");
+
+var svg = d3.select("#vis").append("svg")
+    .attr("width", width + margin.left + margin.right)
+    .attr("height", height + margin.top + margin.bottom)
+  .append("g")
+    .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+
+var layer = svg.selectAll(".layer")
+    .data(layers, function(d) { return d.x; })
+  .enter().append("g")
+    .attr("class", "layer")
+    .style("fill", function(d, i) { return color(i); });
+
+var rect = layer.selectAll("rect")
+    .data(function(d) { return d; })
+  .enter().append("rect")
+    .attr("x", function(d, i, j) { return x(d.x) + x.rangeBand() / n * j; })
+    .attr("y", height)
+    .attr("width", x.rangeBand() / n)
+    .attr("height", 0);
+
+rect.transition()
+    .delay(function(d, i) { return i * 10; })
+    .attr("y", function(d) { return y(d.y / Z); })
+    .attr("height", function(d) { return height - y(d.y / Z); });
+
+svg.append("g")
+    .attr("class", "x axis")
+    .attr("transform", "translate(0," + height + ")")
+    .call(xAxis);
+
+
+function updatePlot() {
+  rect.transition()
+      .duration(100)
+      .delay(function(d, i) { return i * 10; })
+      .attr("x", function(d, i, j) { return x(d.x) + x.rangeBand() / n * j; })
+      .attr("width", x.rangeBand() / n)
+    .transition()
+    .attr("y", function(d, i, j) { 
+          var z = 1;
+          if(j == 0) {
+              z = Z; 
+            } else {
+              z = origZ;
+          }
+        return y(d.y / z); })
+      .attr("height", function(d, i, j) { 
+          var z = 1;
+          if(j == 0) {
+              z = Z; 
+            } else {
+              z = origZ;
+          }
+          return Math.max(0,height - y(d.y/z));
+      });
+}
+
+
+function gaussian(n) {
+  c = n / 2.;
+  s = 2.0;
+  return d3.range(n).map(
+    function(i)
+      {
+          var x = i - c;
+          console.log(i, x, c, Math.ceil(Math.exp(-1.0 * x*x / (2.0 * s*s) )));
+          return {
+            x: i,
+            y: Math.ceil(Math.exp(-1.0 * x*x / (2.0 * s*s)) * 100),
+          };
+      } 
+   )
+}
+
+// probability for the Poisson pmf
+function poisson( x, m )
+{
+    var f = 1;
+    var r;
+    r = Math.pow(m,x)*Math.exp(-m);        // numerator
+    while (x > 0)                          // compute x!
+    {
+        f = f*x;
+        x--;
+    }
+    return (r/f);                          // p(x,m) = (m^x)*exp(-m)/x!
+}
+
+function PoissonSample(lambda)
+{
+    var r = Math.random()
+    var P = 0;
+    var k = 0;
+    var maxiter = 500;
+    do {
+        P += poisson(k, lambda);
+        k += 1
+        maxiter--;
+    } while(P < r && maxiter > 0)
+    if (maxiter == 0) {
+        return 0;
+    }
+    return k-1;
+}
+
+function decay() {
+    if (rate > 0) {
+        var now = new Date().getTime();
+        var dt = now - lastDecay;
+        var lambda = rate * dt / 1000.;
+        
+        var keepGoing = false;
+        for (var i=0; i<m; i++) {
+            var k = PoissonSample(lambda);
+            o = layers[0][i].y;
+            layers[0][i].y = Math.max(1, layers[0][i].y - k);
+            Z -= (o - layers[0][i].y);
+            if (i > 0) {
+                keepGoing |= (layers[0][i] != layers[0][i-1])
+            }
+        }
+
+        if (!keepGoing) {
+            rate = 0.0;
+        }
+        
+        lastDecay = now;
+        updatePlot();
+    }
+}
+
+rate = 5.0;
+lastDecay = new Date().getTime();
+setInterval(decay, 1000);
+
+</script>
