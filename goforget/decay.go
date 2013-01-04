@@ -9,8 +9,8 @@ import (
 
 var MAX_ITER = 1000
 
-func Poisson(lambda float64) int {
-	rand.Seed(time.Now().UnixNano())
+func Poisson(lambda float64, seed int64) int {
+	rand.Seed(seed)
 	if lambda == 0.0 {
 		return 0
 	}
@@ -43,7 +43,7 @@ func Decay(count, Z, t int, rate float64) int {
 	dt := (now - t)
 
 	lambda := rate * float64(dt)
-	k := Poisson(lambda)
+	k := Poisson(lambda, time.Now().UnixNano())
 
 	if k == -1 {
 		log.Printf("Poisson simulation did not converge with rate = %f => lambda = %f", rate, lambda)
