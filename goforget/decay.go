@@ -1,10 +1,13 @@
 package main
 
 import (
+	"log"
 	"math"
 	"math/rand"
 	"time"
 )
+
+var MAX_ITER = 1000
 
 func Poisson(lambda float64) int {
 	rand.Seed(time.Now().UnixNano())
@@ -16,6 +19,7 @@ func Poisson(lambda float64) int {
 		return math.MaxInt32
 	}
 
+	counter := MAX_ITER
 	r := rand.Float64()
 	k := int(0)
 	p := e
@@ -23,6 +27,9 @@ func Poisson(lambda float64) int {
 		k += 1
 		e *= lambda / float64(k)
 		p += e
+		if counter == 0 {
+			return -1
+		}
 	}
 	return k
 }
@@ -37,6 +44,11 @@ func Decay(count, Z, t int, rate float64) int {
 
 	lambda := rate * float64(dt)
 	k := Poisson(lambda)
+
+	if k == -1 {
+		log.Printf("Poisson simulation did not converge with rate = %f => lambda = %f", rate, lambda)
+		return 0
+	}
 
 	return k
 }

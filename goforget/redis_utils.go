@@ -13,64 +13,82 @@ import (
 var rdb redis.Conn
 var rLock sync.RWMutex
 
-func UpdateRedis(readChan chan *Distribution) {
-	var err error
+func UpdateRedis(redisHost string, readChan chan *Distribution) {
+	lredis, err := ConnectRedis(redisHost)
+	if err != nil {
+		log.Printf("Could not connect to redis host: %s: %s", redisHost, err)
+		return
+	}
+
 	for dist := range readChan {
 		log.Printf("Updating distribution: %s", dist.Name)
-
-		ZName := fmt.Sprintf("%s.%s", dist.Name, "_Z")
-		TName := fmt.Sprintf("%s.%s", dist.Name, "_T")
-		rdb.Send("WATCH", ZName)
-
-		if dist.Data == nil {
-			dist.Fill()
-			if err != nil {
-				log.Printf("Could not update %s: %s", dist.Name, err)
-				rdb.Send("UNWATCH")
-				rLock.Unlock()
-				continue
-			}
-			dist.Decay()
-		}
-
-		rLock.Lock()
-		rdb.Send("MULTI")
-
-		if dist.Z == 0 {
-			rdb.Send("UNWATCH")
-			rdb.Send("DISCARD")
-			rLock.Unlock()
-			continue
-		}
-
-		maxCount := 0
-		for k, v := range dist.Data {
-			if v.Count == 0 {
-				rdb.Send("ZREM", dist.Name, k)
-			} else {
-				rdb.Send("ZADD", dist.Name, v.Count, k)
-				if v.Count > maxCount {
-					maxCount = v.Count
-				}
-			}
-		}
-
-		rdb.Send("SET", ZName, dist.Z)
-		rdb.Send("SET", TName, dist.T)
-
-		eta := math.Sqrt(float64(maxCount) / dist.Rate)
-		expTime := int(((*expirSigma) + eta) * eta)
-
-		rdb.Send("EXPIRE", dist.Name, expTime)
-		rdb.Send("EXPIRE", ZName, expTime)
-		rdb.Send("EXPIRE", TName, expTime)
-
-		_, err := rdb.Do("EXEC")
-		rLock.Unlock()
-		if err != nil {
-			log.Printf("Could not update %s: %s", dist.Name, err)
+		ok := UpdateDistribution(lredis, dist)
+		if !ok {
+			log.Println("Failed to update: %s", dist.Name)
 		}
 	}
+}
+
+func UpdateDistribution(rconn redis.Conn, dist *Distribution) bool {
+	ZName := fmt.Sprintf("%s.%s", dist.Name, "_Z")
+	TName := fmt.Sprintf("%s.%s", dist.Name, "_T")
+
+	rconn.Send("WATCH", ZName)
+	defer rconn.Send("UNWATCH")
+
+	if dist.Full() == false {
+		err := dist.Fill()
+		if err != nil {
+			log.Printf("Could not update %s: %s", dist.Name, err)
+			return false
+		}
+		dist.Decay()
+		dist.Normalize()
+	}
+
+	if dist.HasDecayed() == false {
+		log.Printf("Skipping update... nothing has changed: %s", dist.Name)
+		return true
+	}
+
+	rLock.Lock()
+	rconn.Send("MULTI")
+
+	if dist.Z == 0 {
+		rconn.Send("DISCARD")
+		rLock.Unlock()
+		return false
+	}
+
+	maxCount := 0
+	for k, v := range dist.Data {
+		if v.Count == 0 {
+			rconn.Send("ZREM", dist.Name, k)
+		} else {
+			rconn.Send("ZADD", dist.Name, v.Count, k)
+			if v.Count > maxCount {
+				maxCount = v.Count
+			}
+		}
+	}
+
+	rconn.Send("SET", ZName, dist.Z)
+	rconn.Send("SET", TName, dist.T)
+
+	eta := math.Sqrt(float64(maxCount) / dist.Rate)
+	expTime := int(((*expirSigma) + eta) * eta)
+
+	rconn.Send("EXPIRE", dist.Name, expTime)
+	rconn.Send("EXPIRE", ZName, expTime)
+	rconn.Send("EXPIRE", TName, expTime)
+
+	_, err := rconn.Do("EXEC")
+	rLock.Unlock()
+	if err != nil {
+		log.Printf("Could not update %s: %s", dist.Name, err)
+		return false
+	}
+	return true
 }
 
 func GetField(distribution, field string) ([]interface{}, error) {
@@ -116,22 +134,21 @@ func GetDistribution(distribution string) ([]interface{}, error) {
 	return data, err
 }
 
-func ConnectRedis(host string) error {
+func ConnectRedis(host string) (redis.Conn, error) {
 	parts := strings.Split(host, ":")
 
 	if len(parts) != 3 {
 		log.Panicf("redis-host must be in the form host:port:db")
 	}
 
-	var err error
-	rdb, err = redis.Dial("tcp", fmt.Sprintf("%s:%s", parts[0], parts[1]))
+	rdb, err := redis.Dial("tcp", fmt.Sprintf("%s:%s", parts[0], parts[1]))
 	if err == nil {
 		ok, err := rdb.Do("SELECT", parts[2])
 		if ok != "OK" || err != nil {
-			return err
+			return nil, err
 		}
 	} else {
-		return err
+		return nil, err
 	}
-	return nil
+	return rdb, nil
 }

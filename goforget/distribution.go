@@ -19,20 +19,49 @@ type Distribution struct {
 	Data  map[string]*Value `json:"data"`
 	Rate  float64           `json:"rate"`
 	Prune bool              `json:"prune"`
+
+	isFull     bool
+	hasDecayed bool
+}
+
+func (d *Distribution) GetNMostProbable(N int) error {
+	data, err := GetNMostProbable(d.Name, N)
+	if err != nil || len(data) != 3 {
+		return fmt.Errorf("Could not fetch data for %s: %s", d.Name, err)
+	}
+
+	d.Z, _ = redis.Int(data[1], nil)
+	d.T, _ = redis.Int(data[2], nil)
+	d.Data = make(map[string]*Value)
+
+	d.addMultiBulkCounts(data[0])
+	return nil
+}
+
+func (d *Distribution) GetField(field string) error {
+	data, err := GetField(d.Name, field)
+
+	if err != nil || len(data) != 3 {
+		return fmt.Errorf("Could not retrieve field")
+	}
+
+	count, _ := redis.Int(data[0], nil)
+	Z, _ := redis.Int(data[1], nil)
+	T, _ := redis.Int(data[2], nil)
+
+	d.Z = Z
+	d.T = T
+	d.Data = map[string]*Value{field: &Value{Count: count}}
+	d.calcProbabilities()
+
+	return nil
 }
 
 func (d *Distribution) Fill() error {
 	data, err := GetDistribution(d.Name)
-
 	if err != nil {
 		return fmt.Errorf("Could not fetch data for %s: %s", d.Name, err)
 	}
-
-	// TODO: don't use the dist map to speed things up!
-	d.Data = make(map[string]*Value)
-	d.Z = 0
-	d.Rate = *defaultRate
-
 	if data[0] == nil {
 		return nil
 	}
@@ -43,7 +72,20 @@ func (d *Distribution) Fill() error {
 	}
 	d.T = T
 
-	distData, _ := redis.MultiBulk(data[1], nil)
+	// TODO: don't use the dist map to speed things up!
+	d.Data = make(map[string]*Value)
+	d.Rate = *defaultRate
+
+	d.addMultiBulkCounts(data[1])
+	d.Normalize()
+	d.calcProbabilities()
+
+	d.isFull = true
+	return nil
+}
+
+func (d *Distribution) addMultiBulkCounts(data interface{}) error {
+	distData, _ := redis.MultiBulk(data, nil)
 	for i := 0; i < len(distData); i += 2 {
 		k, err := redis.String(distData[i], nil)
 		if err != nil || k == "" {
@@ -54,19 +96,42 @@ func (d *Distribution) Fill() error {
 			log.Printf("Could not read %s from distribution %s: %s", distData[i+1], d.Name, err)
 		}
 		d.Data[k] = &Value{Count: v}
-		d.Z += v
-	}
-
-	fZ := float64(d.Z)
-	for idx, _ := range d.Data {
-		d.Data[idx].P = float64(d.Data[idx].Count) / fZ
 	}
 
 	return nil
 }
 
-func (d *Distribution) Decay() {
+func (d *Distribution) Full() bool {
+	return d.isFull
+}
+
+func (d *Distribution) HasDecayed() bool {
+	return d.hasDecayed
+}
+
+func (d *Distribution) Normalize() {
 	newZ := 0
+	for _, v := range d.Data {
+		newZ += v.Count
+	}
+
+	d.Z = newZ
+	d.calcProbabilities()
+}
+
+func (d *Distribution) calcProbabilities() {
+	fZ := float64(d.Z)
+	for idx, _ := range d.Data {
+		if fZ == 0 {
+			d.Data[idx].P = 0
+		} else {
+			d.Data[idx].P = float64(d.Data[idx].Count) / fZ
+		}
+	}
+}
+
+func (d *Distribution) Decay() {
+	startingZ := d.Z
 	for k, v := range d.Data {
 		l := Decay(v.Count, d.Z, d.T, d.Rate)
 		if l >= d.Data[k].Count {
@@ -77,18 +142,13 @@ func (d *Distribution) Decay() {
 			}
 		}
 		d.Data[k].Count -= l
-		newZ += d.Data[k].Count
+		d.Z -= l
 	}
 
-	fNewZ := float64(newZ)
-	for idx, _ := range d.Data {
-		if fNewZ == 0 {
-			d.Data[idx].P = 0
-		} else {
-			d.Data[idx].P = float64(d.Data[idx].Count) / fNewZ
-		}
+	if !d.hasDecayed && startingZ != d.Z {
+		d.hasDecayed = true
 	}
 
-	d.Z = newZ
 	d.T = int(time.Now().Unix())
+	d.calcProbabilities()
 }

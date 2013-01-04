@@ -3,12 +3,12 @@ package main
 import (
 	"flag"
 	"fmt"
-	"github.com/garyburd/redigo/redis"
 	"log"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 var (
@@ -100,6 +100,7 @@ func DistHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		dist.Decay()
+		dist.Normalize()
 		updateChan <- &dist
 	}
 
@@ -134,42 +135,18 @@ func GetHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	data, err := GetField(distribution, field)
-
-	if err != nil || len(data) != 3 {
+	result := Distribution{
+		Name:  distribution,
+		Rate:  rate,
+		Prune: *pruneDist,
+	}
+	err = result.GetField(field)
+	if err != nil {
 		HttpError(w, 500, "COULD_NOT_RETRIEVE_FIELD")
 		return
 	}
 
-	count, _ := redis.Int(data[0], nil)
-	Z, _ := redis.Int(data[1], nil)
-	t, _ := redis.Int(data[2], nil)
-
-	l := Decay(count, Z, t, rate)
-	if l >= count {
-		if *pruneDist {
-			l = count
-		} else {
-			l = count - 1
-		}
-	}
-	count, Z = count-l, Z-l
-
-	var p float64
-	if Z == 0 {
-		p = 0.0
-	} else {
-		p = float64(count) / float64(Z)
-	}
-
-	result := Distribution{
-		Name:  distribution,
-		Z:     Z,
-		T:     t,
-		Data:  map[string]*Value{field: &Value{Count: count, P: p}},
-		Rate:  rate,
-		Prune: *pruneDist,
-	}
+	result.Decay()
 
 	HttpResponse(w, 200, result)
 	updateChan <- &result
@@ -209,65 +186,32 @@ func NMostProbableHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	data, err := GetNMostProbable(distribution, N)
-	if err != nil || len(data) != 3 {
-		HttpError(w, 500, "COULD_NOT_RETRIEVE_DISTRIBUTION")
-		return
-	}
-
-	counts, _ := redis.MultiBulk(data[0], nil)
-	Z, _ := redis.Int(data[1], nil)
-	t, _ := redis.Int(data[2], nil)
-
-	count_data := make(map[string]*Value)
-	for i := 0; i < len(counts); i += 2 {
-		key, _ := redis.String(counts[i], nil)
-		c, _ := redis.Int(counts[i+1], nil)
-		if key == "" || c == 0 {
-			log.Printf("Could not parse: %s - %s", counts[i], counts[i+1])
-			continue
-		}
-
-		l := Decay(c, Z, t, rate)
-		if l >= c {
-			if *pruneDist {
-				l = c
-			} else {
-				l = c - 1
-			}
-		}
-		c, Z = c-l, Z-l
-		count_data[key] = &Value{
-			Count: c,
-			P:     0.0,
-		}
-	}
-
-	Zeff := float64(Z)
-	if Zeff <= 0 {
-		Zeff = 1.0
-	}
-	for key, _ := range count_data {
-		count_data[key].P = float64(count_data[key].Count) / Zeff
-	}
-
 	result := Distribution{
 		Name:  distribution,
-		Z:     Z,
-		T:     t,
-		Data:  count_data,
 		Rate:  rate,
 		Prune: *pruneDist,
 	}
+	result.GetNMostProbable(N)
+	result.Decay()
 
 	HttpResponse(w, 200, result)
 	updateChan <- &result
 }
 
+func ExitHandler(w http.ResponseWriter, r *http.Request) {
+	fmt.Fprintf(w, "OK")
+	Exit()
+}
+
+func Exit() {
+	close(updateChan)
+}
+
 func main() {
 	flag.Parse()
 
-	err := ConnectRedis(*redisHost)
+	var err error
+	rdb, err = ConnectRedis(*redisHost)
 	if err != nil {
 		log.Printf("Could not connect to redis host: %s: %s", *redisHost, err)
 		return
@@ -275,15 +219,25 @@ func main() {
 		log.Printf("Connected to %s", *redisHost)
 	}
 
-	log.Printf("Starting %d update workers", *nWorkers)
+	log.Printf("Starting %d update worker(s)", *nWorkers)
+	workerWaitGroup := sync.WaitGroup{}
 	updateChan = make(chan *Distribution, 10) //25 * *nWorkers)
 	for i := 0; i < *nWorkers; i++ {
-		go UpdateRedis(updateChan)
+		workerWaitGroup.Add(1)
+		go func() {
+			UpdateRedis(*redisHost, updateChan)
+			workerWaitGroup.Done()
+		}()
 	}
 
 	http.HandleFunc("/get", GetHandler)
 	http.HandleFunc("/incr", IncrHandler)
 	http.HandleFunc("/dist", DistHandler)
 	http.HandleFunc("/nmostprobable", NMostProbableHandler)
-	log.Fatal(http.ListenAndServe(*httpAddress, nil))
+	http.HandleFunc("/exit", ExitHandler)
+	go func() {
+		log.Fatal(http.ListenAndServe(*httpAddress, nil))
+	}()
+
+	workerWaitGroup.Wait()
 }
