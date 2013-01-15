@@ -33,8 +33,8 @@ func IncrHandler(w http.ResponseWriter, r *http.Request) {
 		HttpError(w, 500, "MISSING_ARG_DISTRIBUTION")
 		return
 	}
-	field := reqParams.Get("field")
-	if field == "" {
+	fields, ok := reqParams["field"]
+	if !ok || len(fields) == 0 {
 		HttpError(w, 500, "MISSING_ARG_FIELD")
 		return
 	}
@@ -50,7 +50,7 @@ func IncrHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	err = IncrField(distribution, field, N)
+	err = IncrField(distribution, fields, N)
 	if err == nil {
 		w.WriteHeader(200)
 		fmt.Fprintf(w, "OK")

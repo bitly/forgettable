@@ -113,10 +113,12 @@ func GetNMostProbable(distribution string, N int) ([]interface{}, error) {
 	return data, err
 }
 
-func IncrField(distribution, field string, N int) error {
+func IncrField(distribution string, fields []string, N int) error {
 	rLock.Lock()
 	rdb.Send("MULTI")
-	rdb.Send("ZINCRBY", distribution, N, field)
+	for _, field := range fields {
+		rdb.Send("ZINCRBY", distribution, N, field)
+	}
 	rdb.Send("INCRBY", fmt.Sprintf("%s.%s", distribution, "_Z"), N)
 	rdb.Send("SETNX", fmt.Sprintf("%s.%s", distribution, "_T"), int(time.Now().Unix()))
 	_, err := rdb.Do("EXEC")
