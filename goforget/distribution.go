@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"github.com/garyburd/redigo/redis"
 	"log"
@@ -12,13 +13,27 @@ type Value struct {
 	P     float64 `json:"p"`
 }
 
+type ValueMap map[string]*Value
+
+func (vm ValueMap) MarshalJSON() ([]byte, error) {
+	result := make([]map[string]interface{}, 0, len(vm))
+	for bin, k := range vm {
+		r := make(map[string]interface{})
+		r["bin"] = bin
+		r["count"] = k.Count
+		r["p"] = k.P
+		result = append(result, r)
+	}
+	return json.Marshal(result)
+}
+
 type Distribution struct {
 	Name  string `json:"distribution"`
 	Z     int    `json:"Z"`
 	T     int
-	Data  map[string]*Value `json:"data"`
-	Rate  float64           `json:"rate"`
-	Prune bool              `json:"prune"`
+	Data  ValueMap `json:"data"`
+	Rate  float64  `json:"rate"`
+	Prune bool     `json:"prune"`
 
 	isFull     bool
 	hasDecayed bool
