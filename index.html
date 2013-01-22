@@ -61,7 +61,10 @@
                 Forget-Table is a database for storing non-stationary categorical distributions that forget old observations responsibly.  It has been designed to store millions of distributions and can be written to at a high volume.
             </p>
             <p>
-            Forget-Table is written using a Redis backend. There are go and Python implementations, <a href="https://github.com/bitly/forgettable/tree/master/goforget">goforget</a> and <a href="https://github.com/bitly/forgettable/tree/master/pyforget">pyforget</a>.
+                "Forgetting" from a distribution is done by simulating a Poisson process with a user-specified rate.  This results in equalizing all bins in a distribution such that, if no new observations are added in, the distribution will approach uniform.
+            </p>
+            <p>
+                Forget-Table is written using a Redis backend. There are go and Python implementations, <a href="https://github.com/bitly/forgettable/tree/master/goforget">goforget</a> and <a href="https://github.com/bitly/forgettable/tree/master/pyforget">pyforget</a>.
             </p>
             <p style="text-align:center;">
                 <a href="visualization/">Demo</a><br>
