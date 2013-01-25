@@ -12,6 +12,8 @@ import (
 )
 
 var (
+	VERSION     = "0.1"
+	showVersion = flag.Bool("version", false, "print version string")
 	httpAddress = flag.String("http", ":8080", "HTTP service address (e.g., ':8080')")
 	redisHost   = flag.String("redis-host", "", "Redis host in the form host:port:db.")
 	defaultRate = flag.Float64("default-rate", 0.5, "Default rate to decay distributions with")
@@ -209,6 +211,11 @@ func Exit() {
 
 func main() {
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Printf("goforget: v%s\n", VERSION)
+		return
+	}
 
 	var err error
 	rdb, err = ConnectRedis(*redisHost)
