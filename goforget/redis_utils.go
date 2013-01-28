@@ -61,6 +61,7 @@ func UpdateRedis(readChan chan *Distribution) error {
 			log.Printf("Failed to update: %s", dist.Name)
 		}
 	}
+	return nil
 }
 
 func UpdateDistribution(rconn redis.Conn, dist *Distribution) bool {
