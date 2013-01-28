@@ -12,7 +12,7 @@ import (
 )
 
 var (
-	VERSION     = "0.1"
+	VERSION     = "0.2"
 	showVersion = flag.Bool("version", false, "print version string")
 	httpAddress = flag.String("http", ":8080", "HTTP service address (e.g., ':8080')")
 	redisHost   = flag.String("redis-host", "", "Redis host in the form host:port:db.")
@@ -217,14 +217,7 @@ func main() {
 		return
 	}
 
-	var err error
-	rdb, err = ConnectRedis(*redisHost)
-	if err != nil {
-		log.Printf("Could not connect to redis host: %s: %s", *redisHost, err)
-		return
-	} else {
-		log.Printf("Connected to %s", *redisHost)
-	}
+	redisServer = NewRedisServer(*redisHost)
 
 	log.Printf("Starting %d update worker(s)", *nWorkers)
 	workerWaitGroup := sync.WaitGroup{}
@@ -232,7 +225,7 @@ func main() {
 	for i := 0; i < *nWorkers; i++ {
 		workerWaitGroup.Add(1)
 		go func() {
-			UpdateRedis(*redisHost, updateChan)
+			UpdateRedis(updateChan)
 			workerWaitGroup.Done()
 		}()
 	}
