@@ -50,7 +50,7 @@ var redisServer *RedisServer
 func UpdateRedis(readChan chan *Distribution) error {
 	lredis, err := redisServer.Connect()
 	if err != nil {
-		log.Printf("Could not connect to redis host: %s: %s", redisHost, err)
+		log.Printf("Could not connect to redis host: %s: %s", redisServer.Raw, err)
 		return err
 	}
 
@@ -81,32 +81,34 @@ func UpdateDistribution(rconn redis.Conn, dist *Distribution) bool {
 		dist.Normalize()
 	}
 
-	if dist.HasDecayed() == false {
-		log.Printf("Skipping update... nothing has changed: %s", dist.Name)
-		return true
-	}
-
-	rconn.Send("MULTI")
-
-	if dist.Z == 0 {
-		rconn.Send("DISCARD")
-		return false
-	}
-
 	maxCount := 0
-	for k, v := range dist.Data {
-		if v.Count == 0 {
-			rconn.Send("ZREM", dist.Name, k)
-		} else {
-			rconn.Send("ZADD", dist.Name, v.Count, k)
-			if v.Count > maxCount {
+	rconn.Send("MULTI")
+	if dist.HasDecayed() == true {
+		if dist.Z == 0 {
+			rconn.Send("DISCARD")
+			return false
+		}
+
+		for k, v := range dist.Data {
+			if v.Count == 0 {
+				rconn.Send("ZREM", dist.Name, k)
+			} else {
+				rconn.Send("ZADD", dist.Name, v.Count, k)
+				if v.Count > maxCount {
+					maxCount = v.Count
+				}
+			}
+		}
+
+		rconn.Send("SET", ZName, dist.Z)
+		rconn.Send("SET", TName, dist.T)
+	} else {
+		for _, v := range dist.Data {
+			if v.Count != 0 && v.Count > maxCount {
 				maxCount = v.Count
 			}
 		}
 	}
-
-	rconn.Send("SET", ZName, dist.Z)
-	rconn.Send("SET", TName, dist.T)
 
 	eta := math.Sqrt(float64(maxCount) / dist.Rate)
 	expTime := int(((*expirSigma) + eta) * eta)
@@ -161,7 +163,7 @@ func IncrField(distribution string, fields []string, N int) error {
 	for _, field := range fields {
 		rdb.Send("ZINCRBY", distribution, N, field)
 	}
-	rdb.Send("INCRBY", fmt.Sprintf("%s.%s", distribution, "_Z"), N)
+	rdb.Send("INCRBY", fmt.Sprintf("%s.%s", distribution, "_Z"), N*len(fields))
 	rdb.Send("SETNX", fmt.Sprintf("%s.%s", distribution, "_T"), int(time.Now().Unix()))
 	_, err = rdb.Do("EXEC")
 	return err
