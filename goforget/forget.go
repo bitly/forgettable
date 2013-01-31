@@ -12,7 +12,7 @@ import (
 )
 
 var (
-	VERSION     = "0.2"
+	VERSION     = "0.3"
 	showVersion = flag.Bool("version", false, "print version string")
 	httpAddress = flag.String("http", ":8080", "HTTP service address (e.g., ':8080')")
 	redisHost   = flag.String("redis-host", "", "Redis host in the form host:port:db.")
@@ -57,6 +57,7 @@ func IncrHandler(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(200)
 		fmt.Fprintf(w, "OK")
 	} else {
+		log.Printf("Failed to incr: %s", err)
 		w.WriteHeader(500)
 		fmt.Fprintf(w, "FAIL")
 	}
