@@ -6,7 +6,7 @@ Simply build with `go build` and install with `go install`!
 
 Requirements:
 
-* [goredis](http://github.com/garyburd/redigo)
+* [redigo](http://github.com/garyburd/redigo)
 
 
 ## Running
