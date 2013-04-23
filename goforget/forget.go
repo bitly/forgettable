@@ -12,7 +12,7 @@ import (
 )
 
 var (
-	VERSION     = "0.3"
+	VERSION     = "0.3.1"
 	showVersion = flag.Bool("version", false, "print version string")
 	httpAddress = flag.String("http", ":8080", "HTTP service address (e.g., ':8080')")
 	redisHost   = flag.String("redis-host", "", "Redis host in the form host:port:db.")
@@ -226,7 +226,7 @@ func main() {
 	for i := 0; i < *nWorkers; i++ {
 		workerWaitGroup.Add(1)
 		go func() {
-			UpdateRedis(updateChan)
+			UpdateRedis(updateChan, i)
 			workerWaitGroup.Done()
 		}()
 	}

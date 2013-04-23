@@ -9,6 +9,10 @@ import (
 	"time"
 )
 
+var (
+	DistributionEmpty = fmt.Errorf("Distribution already empty, not updating")
+)
+
 type RedisServer struct {
 	Raw  string
 	Host string
@@ -47,7 +51,7 @@ func (rs *RedisServer) Connect() (redis.Conn, error) {
 
 var redisServer *RedisServer
 
-func UpdateRedis(readChan chan *Distribution) error {
+func UpdateRedis(readChan chan *Distribution, id int) error {
 	lredis, err := redisServer.Connect()
 	if err != nil {
 		log.Printf("Could not connect to redis host: %s: %s", redisServer.Raw, err)
@@ -55,16 +59,16 @@ func UpdateRedis(readChan chan *Distribution) error {
 	}
 
 	for dist := range readChan {
-		log.Printf("Updating distribution: %s", dist.Name)
-		ok := UpdateDistribution(lredis, dist)
-		if !ok {
-			log.Printf("Failed to update: %s", dist.Name)
+		log.Printf("[%d] Updating distribution: %s", id, dist.Name)
+		err := UpdateDistribution(lredis, dist)
+		if err != nil {
+			log.Printf("[%d] Failed to update: %s: %s", id, dist.Name, err.Error())
 		}
 	}
 	return nil
 }
 
-func UpdateDistribution(rconn redis.Conn, dist *Distribution) bool {
+func UpdateDistribution(rconn redis.Conn, dist *Distribution) error {
 	ZName := fmt.Sprintf("%s.%s", dist.Name, "_Z")
 	TName := fmt.Sprintf("%s.%s", dist.Name, "_T")
 
@@ -74,8 +78,7 @@ func UpdateDistribution(rconn redis.Conn, dist *Distribution) bool {
 	if dist.Full() == false {
 		err := dist.Fill()
 		if err != nil {
-			log.Printf("Could not fill %s: %s", dist.Name, err)
-			return false
+			return fmt.Errorf("Could not fill: %s", err)
 		}
 		dist.Decay()
 		dist.Normalize()
@@ -86,7 +89,7 @@ func UpdateDistribution(rconn redis.Conn, dist *Distribution) bool {
 	if dist.HasDecayed() == true {
 		if dist.Z == 0 {
 			rconn.Send("DISCARD")
-			return false
+			return DistributionEmpty
 		}
 
 		for k, v := range dist.Data {
@@ -119,10 +122,9 @@ func UpdateDistribution(rconn redis.Conn, dist *Distribution) bool {
 
 	_, err := rconn.Do("EXEC")
 	if err != nil {
-		log.Printf("Could not update %s: %s", dist.Name, err)
-		return false
+		return fmt.Errorf("Could not update %s: %s", dist.Name, err)
 	}
-	return true
+	return nil
 }
 
 func GetField(distribution, field string) ([]interface{}, error) {
