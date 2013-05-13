@@ -32,3 +32,6 @@ options, type `goforget --help`!
 
 * Access N fields with highest probability
   * `/nmostprobable?distribution=colors&N=10`
+
+* Get the number of distributions currently being stores
+  * `/dbsize`
