@@ -155,6 +155,14 @@ func GetHandler(w http.ResponseWriter, r *http.Request) {
 	updateChan <- &result
 }
 
+func DBSizeHandler(w http.ResponseWriter, r *http.Request) {
+	size, err := DBSize()
+	if err != nil {
+		HttpError(w, 500, "COULD_NOT_READ_SIZE")
+	}
+	HttpResponse(w, 200, size/3)
+}
+
 func NMostProbableHandler(w http.ResponseWriter, r *http.Request) {
 	reqParams, err := url.ParseQuery(r.URL.RawQuery)
 	if err != nil {
@@ -235,6 +243,7 @@ func main() {
 	http.HandleFunc("/incr", IncrHandler)
 	http.HandleFunc("/dist", DistHandler)
 	http.HandleFunc("/nmostprobable", NMostProbableHandler)
+	http.HandleFunc("/dbsize", DBSizeHandler)
 	http.HandleFunc("/exit", ExitHandler)
 	go func() {
 		log.Fatal(http.ListenAndServe(*httpAddress, nil))
