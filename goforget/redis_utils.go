@@ -183,3 +183,13 @@ func GetDistribution(distribution string) ([]interface{}, error) {
 	data, err := redis.MultiBulk(rdb.Do("EXEC"))
 	return data, err
 }
+
+func DBSize() (int, error) {
+	rdb, err := redisServer.Connect()
+	if err != nil {
+		return 0, err
+	}
+
+	data, err := redis.Int(rdb.Do("DBSIZE"))
+	return data, err
+}
