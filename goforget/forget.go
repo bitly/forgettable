@@ -12,7 +12,7 @@ import (
 )
 
 var (
-	VERSION     = "0.3.1"
+	VERSION     = "0.4.0"
 	showVersion = flag.Bool("version", false, "print version string")
 	httpAddress = flag.String("http", ":8080", "HTTP service address (e.g., ':8080')")
 	redisHost   = flag.String("redis-host", "", "Redis host in the form host:port:db.")
