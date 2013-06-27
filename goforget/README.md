@@ -6,7 +6,8 @@ Simply build with `go build` and install with `go install`!
 
 Requirements:
 
-* [redigo](http://github.com/garyburd/redigo)
+* [redigo](http://github.com/garyburd/redigo) (must be after commit 69e1a27a where redis.Pool.TestOnBorrow was introduced)
+* [redis](http://redis.io/) v2.7 or higher
 
 
 ## Running
