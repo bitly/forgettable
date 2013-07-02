@@ -12,7 +12,7 @@ import (
 )
 
 var (
-	VERSION     = "0.4.0"
+	VERSION     = "0.4.1"
 	showVersion = flag.Bool("version", false, "print version string")
 	httpAddress = flag.String("http", ":8080", "HTTP service address (e.g., ':8080')")
 	redisHost   = flag.String("redis-host", "", "Redis host in the form host:port:db.")
@@ -23,6 +23,7 @@ var (
 )
 
 var updateChan chan *Distribution
+var redisServer *RedisServer
 
 func IncrHandler(w http.ResponseWriter, r *http.Request) {
 	reqParams, err := url.ParseQuery(r.URL.RawQuery)
@@ -226,17 +227,17 @@ func main() {
 		return
 	}
 
-	redisServer = NewRedisServer(*redisHost)
+	redisServer = NewRedisServer(*redisHost, *nWorkers*2)
 
 	log.Printf("Starting %d update worker(s)", *nWorkers)
 	workerWaitGroup := sync.WaitGroup{}
 	updateChan = make(chan *Distribution, 10) //25 * *nWorkers)
 	for i := 0; i < *nWorkers; i++ {
 		workerWaitGroup.Add(1)
-		go func() {
-			UpdateRedis(updateChan, i)
+		go func(idx int) {
+			UpdateRedis(updateChan, idx)
 			workerWaitGroup.Done()
-		}()
+		}(i)
 	}
 
 	http.HandleFunc("/get", GetHandler)

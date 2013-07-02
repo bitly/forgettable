@@ -20,50 +20,62 @@ type RedisServer struct {
 	Db   string
 
 	hostname string
+	pool     *redis.Pool
 }
 
-func NewRedisServer(rawString string) *RedisServer {
+func NewRedisServer(rawString string, MaxIdle int) *RedisServer {
 	parts := strings.Split(rawString, ":")
 	if len(parts) != 3 {
 		log.Panicf("redis-host must be in the form host:port:db")
 	}
-	return &RedisServer{
+	rs := &RedisServer{
 		Raw:      rawString,
 		Host:     parts[0],
 		Port:     parts[1],
 		Db:       parts[2],
 		hostname: parts[0] + ":" + parts[1],
 	}
+	rs.connectPool(MaxIdle)
+	return rs
 }
 
-func (rs *RedisServer) Connect() (redis.Conn, error) {
-	rdb, err := redis.Dial("tcp", rs.hostname)
-	if err == nil {
-		ok, err := rdb.Do("SELECT", rs.Db)
-		if ok != "OK" || err != nil {
-			return nil, err
-		}
-	} else {
-		return nil, err
+func (rs *RedisServer) GetConnection() redis.Conn {
+	return rs.pool.Get()
+}
+
+func (rs *RedisServer) connectPool(maxIdle int) {
+	rs.pool = &redis.Pool{
+		MaxIdle:     maxIdle,
+		IdleTimeout: 240 * time.Second,
+		Dial: func() (redis.Conn, error) {
+			c, err := redis.Dial("tcp", rs.hostname)
+			if err != nil {
+				return nil, err
+			}
+			if _, err := c.Do("SELECT", rs.Db); err != nil {
+				c.Close()
+				return nil, err
+			}
+			return c, err
+		},
+		TestOnBorrow: func(c redis.Conn, t time.Time) error {
+			_, err := c.Do("PING")
+			return err
+		},
 	}
-	return rdb, nil
 }
-
-var redisServer *RedisServer
 
 func UpdateRedis(readChan chan *Distribution, id int) error {
-	lredis, err := redisServer.Connect()
-	if err != nil {
-		log.Printf("Could not connect to redis host: %s: %s", redisServer.Raw, err)
-		return err
-	}
-
+	var redisConn redis.Conn
 	for dist := range readChan {
 		log.Printf("[%d] Updating distribution: %s", id, dist.Name)
-		err := UpdateDistribution(lredis, dist)
+
+		redisConn = redisServer.GetConnection()
+		err := UpdateDistribution(redisConn, dist)
 		if err != nil {
-			log.Printf("[%d] Failed to update: %s: %s", id, dist.Name, err.Error())
+			log.Printf("[%d] Failed to update: %s: %v: %s", id, dist.Name, redisConn.Err(), err.Error())
 		}
+		redisConn.Close()
 	}
 	return nil
 }
@@ -128,10 +140,7 @@ func UpdateDistribution(rconn redis.Conn, dist *Distribution) error {
 }
 
 func GetField(distribution, field string) ([]interface{}, error) {
-	rdb, err := redisServer.Connect()
-	if err != nil {
-		return nil, err
-	}
+	rdb := redisServer.GetConnection()
 
 	rdb.Send("MULTI")
 	rdb.Send("ZSCORE", distribution, field)
@@ -142,10 +151,7 @@ func GetField(distribution, field string) ([]interface{}, error) {
 }
 
 func GetNMostProbable(distribution string, N int) ([]interface{}, error) {
-	rdb, err := redisServer.Connect()
-	if err != nil {
-		return nil, err
-	}
+	rdb := redisServer.GetConnection()
 
 	rdb.Send("MULTI")
 	rdb.Send("ZREVRANGEBYSCORE", distribution, "+INF", "-INF", "WITHSCORES", "LIMIT", 0, N)
@@ -156,10 +162,7 @@ func GetNMostProbable(distribution string, N int) ([]interface{}, error) {
 }
 
 func IncrField(distribution string, fields []string, N int) error {
-	rdb, err := redisServer.Connect()
-	if err != nil {
-		return err
-	}
+	rdb := redisServer.GetConnection()
 
 	rdb.Send("MULTI")
 	for _, field := range fields {
@@ -167,15 +170,12 @@ func IncrField(distribution string, fields []string, N int) error {
 	}
 	rdb.Send("INCRBY", fmt.Sprintf("%s.%s", distribution, "_Z"), N*len(fields))
 	rdb.Send("SETNX", fmt.Sprintf("%s.%s", distribution, "_T"), int(time.Now().Unix()))
-	_, err = rdb.Do("EXEC")
+	_, err := rdb.Do("EXEC")
 	return err
 }
 
 func GetDistribution(distribution string) ([]interface{}, error) {
-	rdb, err := redisServer.Connect()
-	if err != nil {
-		return nil, err
-	}
+	rdb := redisServer.GetConnection()
 
 	rdb.Send("MULTI")
 	rdb.Send("GET", fmt.Sprintf("%s.%s", distribution, "_T"))
@@ -185,10 +185,7 @@ func GetDistribution(distribution string) ([]interface{}, error) {
 }
 
 func DBSize() (int, error) {
-	rdb, err := redisServer.Connect()
-	if err != nil {
-		return 0, err
-	}
+	rdb := redisServer.GetConnection()
 
 	data, err := redis.Int(rdb.Do("DBSIZE"))
 	return data, err
