@@ -10,7 +10,6 @@ import (
 var MAX_ITER = 1000
 
 func Poisson(lambda float64, seed int64) int {
-	rand.Seed(seed)
 	if lambda == 0.0 {
 		return 0
 	}
@@ -19,6 +18,7 @@ func Poisson(lambda float64, seed int64) int {
 		return math.MaxInt32
 	}
 
+	rand.Seed(seed)
 	counter := MAX_ITER
 	r := rand.Float64()
 	k := int(0)
