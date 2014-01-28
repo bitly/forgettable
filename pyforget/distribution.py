@@ -46,7 +46,7 @@ class Distribution(object):
 
     def decrement(self):
         # check this distribution exists to decrement
-        if r.get(self.k) is None:
+        if not r.exists(self.k):
             raise KeyError('Cannot find distribution in Redis')
         # get the currently stored data
         self.keys, self.values = zip(*r.zrevrange(self.k,0,-1,withscores=True))
