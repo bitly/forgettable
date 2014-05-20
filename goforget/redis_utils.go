@@ -26,7 +26,7 @@ type RedisServer struct {
 func NewRedisServer(rawString string, MaxIdle int) *RedisServer {
 	parts := strings.Split(rawString, ":")
 	if len(parts) != 3 {
-		log.Panicf("redis-host must be in the form host:port:db")
+		log.Fatal("redis-host must be in the form host:port:db")
 	}
 	rs := &RedisServer{
 		Raw:      rawString,
