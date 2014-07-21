@@ -20,19 +20,19 @@ def interleave_izip(*iterables):
 
 class Distribution(object):
 
-    def __init__(self, k, redis=None):
+    def __init__(self, k, redis=None, rate=0.02):
         self.k = k
-
+        self.rate = rate
         if not redis:
             self.redis = r 
 
-    def decay(self, rate=0.02):
+    def decay(self):
         """
         returns the amount to decay each bin by
         """
         t = int(time.time())
         tau = t - self.last_updated
-        rates = [v * rate * tau for v in self.values]
+        rates = [v * self.rate * tau for v in self.values]
         y = np.random.poisson(rates)
         return y, t
 
