@@ -20,8 +20,11 @@ def interleave_izip(*iterables):
 
 class Distribution(object):
 
-    def __init__(self, k):
+    def __init__(self, k, redis=None):
         self.k = k
+
+        if not redis:
+            self.redis = r 
 
     def decay(self, rate=0.02):
         """
@@ -37,25 +40,25 @@ class Distribution(object):
         """
         on an event, update the sorted set and the normalizing constant
         """
-        r.zincrby(self.k, bin)
-        a = r.incr(self.k + "_z")
+        self.redis.zincrby(self.k, bin)
+        a = self.redis.incr(self.k + "_z")
         if a == 1:
             # this catches the situtation where we've never seen the
             # the key before, setting t to the time of the initial write
-            r.set(self.k + '_t', int(time.time()))
+            self.redis.set(self.k + '_t', int(time.time()))
 
     def __str__(self):
         return str(dict(zip(self.keys, self.values)))
 
     def decrement(self):
         # check this distribution exists to decrement
-        if not r.exists(self.k):
+        if not self.redis.exists(self.k):
             raise KeyError('Cannot find distribution in Redis')
         # get the currently stored data
-        self.keys, self.values = zip(*r.zrevrange(self.k, 0, -1, withscores=True))
-        self.z = r.get(self.k + "_z")
+        self.keys, self.values = zip(*self.redis.zrevrange(self.k, 0, -1, withscores=True))
+        self.z = self.redis.get(self.k + "_z")
         self.n = len(self.values)
-        self.last_updated = int(r.get(self.k + "_t"))
+        self.last_updated = int(self.redis.get(self.k + "_t"))
         # get the amount to decay by
         y, t = self.decay()
         # decay values by y
@@ -64,7 +67,7 @@ class Distribution(object):
         # normalizing constant
         self.z = int(self.values.sum())
         # build multi call
-        pipeline = r.pipeline()
+        pipeline = self.redis.pipeline()
         pipeline.watch(self.k, self.k + '_t', self.k + '_z')
         pipeline.multi()
         pipeline.zadd(self.k, *interleave_izip(self.values, self.keys))
