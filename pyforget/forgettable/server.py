@@ -3,7 +3,7 @@ import tornado.web
 import tornado.httpserver
 import tornado.ioloop
 
-from distribution import Distribution
+from .distribution import Distribution
 
 
 class Application(tornado.web.Application):
@@ -88,9 +88,14 @@ class DistHandler(tornado.web.RequestHandler):
             } for key, value in dist.iteritems()]
         })
 
-if __name__ == "__main__":
+
+def main():
     tornado.options.define("port", default=8000, help="Listen on port", type=int)
     tornado.options.parse_command_line()
     http_server = tornado.httpserver.HTTPServer(request_callback=Application())
     http_server.listen(tornado.options.options.port, address="0.0.0.0")
     tornado.ioloop.IOLoop.instance().start()
+
+
+if __name__ == "__main__":
+    main()

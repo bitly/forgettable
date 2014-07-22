@@ -1,13 +1,7 @@
 import numpy as np
 import time
 import redis
-
-
-r = redis.StrictRedis(
-    'localhost',
-    port=6379,
-    db=2
-)
+import os
 
 
 def interleave_izip(*iterables):
@@ -20,11 +14,16 @@ def interleave_izip(*iterables):
 
 class Distribution(object):
 
-    def __init__(self, k, redis=None, rate=0.02):
+    def __init__(self, k, redis_client=None, rate=0.02):
         self.k = k
         self.rate = rate
-        if not redis:
-            self.redis = r 
+        if not redis_client:
+            redis_client = redis.StrictRedis(
+                os.environ['REDIS_1_PORT_6379_TCP_ADDR'],
+                port=6379,
+                db=1
+            )
+        self.redis = redis_client
 
     def decay(self):
         """

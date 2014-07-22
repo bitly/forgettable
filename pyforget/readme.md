@@ -2,7 +2,10 @@
 
 Written by [Mike Dewar](http://twitter.com/mikedewar) and [Micha Gorelick](http://micha.gd/).
 
-To start the service run `python forget-table.py --port=8080` which will start the wrapper. Note that you will need a Redis database running locally on port 6379. Forget Table will write into db 2 by default. 
+To install run `pip install forgettable`.
+For the development version run `pip install -e git+https://github.com/bitly/forgettable.git#egg=forgettable&subdirectory=pyforget`
+
+To start the service run `forgettable --port=8080` which will start the wrapper. Note that you will need a Redis database running locally on port 6379. Forget Table will write into db 2 by default. 
 
 Upon recieving an event, to increment a bin in a distribution call 
 
