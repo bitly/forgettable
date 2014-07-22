@@ -16,7 +16,7 @@ setup(
         'redis',
     ],
 
-    long_description=open('readme.md').read(),
+    #long_description=open('readme.md').read(),
     author="bitly",
     url="https://github.com/bitly/forgettable/tree/master/pyforget",
 )
