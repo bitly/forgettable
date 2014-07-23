@@ -1,2 +1,5 @@
 *.sw[op]
 *.rdb
+pyforget/build/
+pyforget/dist/
+pyforget/*.egg-info/

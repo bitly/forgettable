@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="forgettable",
-    version="0.0.0",
+    version="0.1.0",
     packages=find_packages(),
     entry_points={
         'console_scripts': [
@@ -16,7 +16,8 @@ setup(
         'redis',
     ],
 
-    #long_description=open('readme.md').read(),
-    author="bitly",
+    long_description=open('readme.md').read(),
     url="https://github.com/bitly/forgettable/tree/master/pyforget",
+    maintainer="Saul Shanabrook",
+    maintainer_email="s.shanabrook@gmail.com",
 )
