@@ -139,11 +139,13 @@ func UpdateDistribution(rconn redis.Conn, dist *Distribution) error {
 	return nil
 }
 
-func GetField(distribution, field string) ([]interface{}, error) {
+func GetField(distribution string, fields ...string) ([]interface{}, error) {
 	rdb := redisServer.GetConnection()
 
 	rdb.Send("MULTI")
-	rdb.Send("ZSCORE", distribution, field)
+	for _, field := range fields {
+		rdb.Send("ZSCORE", distribution, field)
+	}
 	rdb.Send("GET", fmt.Sprintf("%s.%s", distribution, "_Z"))
 	rdb.Send("GET", fmt.Sprintf("%s.%s", distribution, "_T"))
 	data, err := redis.MultiBulk(rdb.Do("EXEC"))

@@ -12,7 +12,7 @@ import (
 )
 
 var (
-	VERSION     = "0.4.3"
+	VERSION     = "0.4.4"
 	showVersion = flag.Bool("version", false, "print version string")
 	httpAddress = flag.String("http", ":8080", "HTTP service address (e.g., ':8080')")
 	redisHost   = flag.String("redis-host", "", "Redis host in the form host:port:db.")
@@ -122,8 +122,8 @@ func GetHandler(w http.ResponseWriter, r *http.Request) {
 		HttpError(w, 500, "MISSING_ARG_DISTRIBUTION")
 		return
 	}
-	field := reqParams.Get("field")
-	if field == "" {
+	fields, ok := reqParams["field"]
+	if !ok || len(fields) == 0 {
 		HttpError(w, 500, "MISSING_ARG_FIELD")
 		return
 	}
@@ -144,7 +144,7 @@ func GetHandler(w http.ResponseWriter, r *http.Request) {
 		Rate:  rate,
 		Prune: *pruneDist,
 	}
-	err = result.GetField(field)
+	err = result.GetField(fields...)
 	if err != nil {
 		HttpError(w, 500, "COULD_NOT_RETRIEVE_FIELD")
 		return
