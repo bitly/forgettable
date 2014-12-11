@@ -152,8 +152,9 @@ func (d *Distribution) calcProbabilities() {
 
 func (d *Distribution) Decay() {
 	startingZ := d.Z
+	now := time.Now()
 	for k, v := range d.Data {
-		l := Decay(v.Count, d.Z, d.T, d.Rate)
+		l := DecayTime(v.Count, d.Z, d.T, d.Rate, now)
 		if l >= d.Data[k].Count {
 			if d.Prune {
 				l = d.Data[k].Count
