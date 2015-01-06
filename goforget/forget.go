@@ -162,6 +162,7 @@ func DBSizeHandler(w http.ResponseWriter, r *http.Request) {
 	size, err := DBSize()
 	if err != nil {
 		HttpError(w, 500, "COULD_NOT_READ_SIZE")
+		return
 	}
 	HttpResponse(w, 200, size/3)
 }
