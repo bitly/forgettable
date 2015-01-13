@@ -233,7 +233,6 @@ func main() {
 	}
 
 	rand.Seed(time.Now().UnixNano())
-	redisServer = NewRedisServer(*redisHost, *nWorkers*2)
 	if *redisUri != "" {
 		// if a redis URI exists was specified, parse it
 		redisServer = NewRedisServerFromUri(*redisUri)
