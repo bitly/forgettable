@@ -28,12 +28,14 @@ func (vm ValueMap) MarshalJSON() ([]byte, error) {
 }
 
 type Distribution struct {
-	Name  string `json:"distribution"`
-	Z     int    `json:"Z"`
-	T     int
-	Data  ValueMap `json:"data"`
-	Rate  float64  `json:"rate"`
-	Prune bool     `json:"prune"`
+	Name       string `json:"distribution"`
+	Z          int    `json:"Z"`
+	T          int
+	Data       ValueMap `json:"data"`
+	Rate       float64  `json:"rate"`
+	Prune      bool     `json:"prune"`
+	LastSyncT  int      `json:"last_sync_time"`
+	numEntries int
 
 	isFull     bool
 	hasDecayed bool
@@ -41,13 +43,15 @@ type Distribution struct {
 
 func (d *Distribution) GetNMostProbable(N int) error {
 	data, err := GetNMostProbable(d.Name, N)
-	if err != nil || len(data) != 3 {
+	if err != nil || len(data) != 4 {
 		return fmt.Errorf("Could not fetch data for %s: %s", d.Name, err)
 	}
 
-	d.Z, _ = redis.Int(data[1], nil)
-	d.T, _ = redis.Int(data[2], nil)
+	d.numEntries, _ = redis.Int(data[1], nil)
+	d.Z, _ = redis.Int(data[2], nil)
+	d.T, _ = redis.Int(data[3], nil)
 	d.Data = make(map[string]*Value)
+	d.LastSyncT = d.T
 
 	d.addMultiBulkCounts(data[0])
 	return nil
@@ -57,15 +61,15 @@ func (d *Distribution) GetField(fields ...string) error {
 	data, err := GetField(d.Name, fields...)
 
 	N := len(fields)
-	if err != nil || len(data) != 2+N {
+	if err != nil || len(data) != 3+N {
 		return fmt.Errorf("Could not retrieve field")
 	}
 
-	Z, _ := redis.Int(data[N], nil)
-	T, _ := redis.Int(data[N+1], nil)
+	d.numEntries, _ = redis.Int(data[N], nil)
+	d.Z, _ = redis.Int(data[N+1], nil)
+	d.T, _ = redis.Int(data[N+2], nil)
+	d.LastSyncT = d.T
 
-	d.Z = Z
-	d.T = T
 	d.Data = make(map[string]*Value)
 	var count int
 	for i, field := range fields {
@@ -91,16 +95,18 @@ func (d *Distribution) Fill() error {
 		log.Printf("Could not read _T from distribution %s: %s", d.Name, err)
 	}
 	d.T = T
+	d.LastSyncT = d.T
 
 	// TODO: don't use the dist map to speed things up!
 	d.Data = make(map[string]*Value)
 	d.Rate = *defaultRate
+	d.numEntries = len(data)
 
 	d.addMultiBulkCounts(data[1])
+	d.isFull = true
+
 	d.Normalize()
 	d.calcProbabilities()
-
-	d.isFull = true
 	return nil
 }
 
@@ -151,10 +157,16 @@ func (d *Distribution) calcProbabilities() {
 }
 
 func (d *Distribution) Decay() {
+	if len(d.Data) == 0 {
+		return
+	}
+
 	startingZ := d.Z
 	now := time.Now()
-	for k, v := range d.Data {
-		l := DecayTime(v.Count, d.Z, d.T, d.Rate, now)
+	Z := 0
+	sumDecay := 0
+	for k, _ := range d.Data {
+		l := DecayTime(d.Z, d.T, d.Rate, now)
 		if l >= d.Data[k].Count {
 			if d.Prune {
 				l = d.Data[k].Count
@@ -162,14 +174,24 @@ func (d *Distribution) Decay() {
 				l = d.Data[k].Count - 1
 			}
 		}
+		sumDecay += l
 		d.Data[k].Count -= l
-		d.Z -= l
+		Z += d.Data[k].Count
+	}
+	if d.isFull {
+		d.Z = Z
+	} else {
+		d.Z -= (sumDecay) / len(d.Data) * d.numEntries
+		if d.Z < 0 {
+			d.Z = 0
+		}
 	}
 
 	if !d.hasDecayed && startingZ != d.Z {
 		d.hasDecayed = true
 	}
 
-	d.T = int(time.Now().Unix())
+	d.T = int(now.Unix())
+
 	d.calcProbabilities()
 }
