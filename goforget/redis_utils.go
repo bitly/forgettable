@@ -67,15 +67,27 @@ func (rs *RedisServer) connectPool(maxIdle int) {
 
 func UpdateRedis(readChan chan *Distribution, id int) error {
 	var redisConn redis.Conn
+	var now int
+	lastStatusTime := int(time.Now().Unix())
+	updateCount := 0
 	for dist := range readChan {
-		log.Printf("[%d] Updating distribution: %s", id, dist.Name)
-
-		redisConn = redisServer.GetConnection()
-		err := UpdateDistribution(redisConn, dist)
-		if err != nil {
-			log.Printf("[%d] Failed to update: %s: %v: %s", id, dist.Name, redisConn.Err(), err.Error())
+		// Only do a update if we have all the data necissary or we expect
+		// there to be a decay event
+		now = int(time.Now().Unix())
+		if dist.Full() || float64(now-dist.LastSyncT)*dist.Rate > 0.75 {
+			redisConn = redisServer.GetConnection()
+			err := UpdateDistribution(redisConn, dist)
+			if err != nil {
+				log.Printf("[%d] Failed to update: %s: %v: %s", id, dist.Name, redisConn.Err(), err.Error())
+			}
+			updateCount += 1
+			if now-lastStatusTime > *UpdateOutputTime {
+				rate := float64(updateCount) / float64(now-lastStatusTime)
+				log.Printf("[%d] Performing redis updates at %e updates/second", id, rate)
+				lastStatusTime = now
+				updateCount = 0
+			}
 		}
-		redisConn.Close()
 	}
 	return nil
 }
@@ -146,6 +158,7 @@ func GetField(distribution string, fields ...string) ([]interface{}, error) {
 	for _, field := range fields {
 		rdb.Send("ZSCORE", distribution, field)
 	}
+	rdb.Send("ZCARD", distribution)
 	rdb.Send("GET", fmt.Sprintf("%s.%s", distribution, "_Z"))
 	rdb.Send("GET", fmt.Sprintf("%s.%s", distribution, "_T"))
 	data, err := redis.MultiBulk(rdb.Do("EXEC"))
@@ -157,6 +170,7 @@ func GetNMostProbable(distribution string, N int) ([]interface{}, error) {
 
 	rdb.Send("MULTI")
 	rdb.Send("ZREVRANGEBYSCORE", distribution, "+INF", "-INF", "WITHSCORES", "LIMIT", 0, N)
+	rdb.Send("ZCARD", distribution)
 	rdb.Send("GET", fmt.Sprintf("%s.%s", distribution, "_Z"))
 	rdb.Send("GET", fmt.Sprintf("%s.%s", distribution, "_T"))
 	data, err := redis.MultiBulk(rdb.Do("EXEC"))
