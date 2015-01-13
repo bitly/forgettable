@@ -232,15 +232,13 @@ func main() {
 	}
 
 	rand.Seed(time.Now().UnixNano())
-	redisServer = NewRedisServer(*redisHost, *nWorkers*2)
+	redisServer = NewRedisServerFromUri("redis://localhost:6379/1")
 	if *redisUri != "" {
 		// if a redis URI exists was specified, parse it
 		redisServer = NewRedisServerFromUri(*redisUri)
 	} else if *redisHost != "" {
 		// for legacy mode
 		redisServer = NewRedisServerFromRaw(*redisHost)
-	} else {
-		redisServer = NewRedisServerFromUri("redis://localhost:6379/1")
 	}
 
 	// create the connection pool
