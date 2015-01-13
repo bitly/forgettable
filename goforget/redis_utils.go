@@ -5,6 +5,7 @@ import (
 	"github.com/garyburd/redigo/redis"
 	"log"
 	"math"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -14,33 +15,82 @@ var (
 )
 
 type RedisServer struct {
-	Raw  string
 	Host string
 	Port string
 	Db   string
+	Pass string
 
 	hostname string
 	pool     *redis.Pool
 }
 
-func NewRedisServer(rawString string, MaxIdle int) *RedisServer {
+func NewRedisServerFromRaw(rawString string) *RedisServer {
 	parts := strings.Split(rawString, ":")
 	if len(parts) != 3 {
 		log.Fatal("redis-host must be in the form host:port:db")
 	}
 	rs := &RedisServer{
-		Raw:      rawString,
 		Host:     parts[0],
 		Port:     parts[1],
 		Db:       parts[2],
 		hostname: parts[0] + ":" + parts[1],
 	}
-	rs.connectPool(MaxIdle)
+	return rs
+}
+
+func NewRedisServerFromUri(uriString string) *RedisServer {
+	url, err := url.Parse(uriString)
+	if err != nil {
+		log.Fatal("redis-uri must be in the form redis://[:password@]hostname:port[/db_number]")
+	}
+
+	// host and port (for nil-case port, set default: 6379)
+	parts := strings.Split(url.Host, ":")
+	host := parts[0]
+	port := "6379" //default case
+	if len(parts) > 1 {
+		port = parts[1]
+	}
+	hostname := host + ":" + port
+
+	// database number (for nil-case db, set default: 0)
+	db := "0"
+	if url.Path != "" {
+		db = strings.Split(url.Path, "/")[1]
+	}
+
+	// check for password
+	password := ""
+	if url.User != nil {
+		password, _ = url.User.Password()
+	}
+
+	rs := &RedisServer{
+		Host:     host,
+		Port:     port,
+		hostname: hostname,
+		Pass:     password,
+		Db:       db,
+	}
 	return rs
 }
 
 func (rs *RedisServer) GetConnection() redis.Conn {
 	return rs.pool.Get()
+}
+
+func (rs *RedisServer) Connect(maxIdle int) {
+	// set up the connection pool
+	rs.connectPool(maxIdle)
+
+	// verify the connection pool is valid before allowing program to continue
+	conn := rs.GetConnection()
+	_, err := conn.Do("PING")
+	if err != nil {
+		log.Fatal("Could not connect to Redis!")
+	}
+	conn.Close()
+
 }
 
 func (rs *RedisServer) connectPool(maxIdle int) {
@@ -51,6 +101,12 @@ func (rs *RedisServer) connectPool(maxIdle int) {
 			c, err := redis.Dial("tcp", rs.hostname)
 			if err != nil {
 				return nil, err
+			}
+			if rs.Pass != "" {
+				if _, err := c.Do("AUTH", rs.Pass); err != nil {
+					c.Close()
+					return nil, err
+				}
 			}
 			if _, err := c.Do("SELECT", rs.Db); err != nil {
 				c.Close()

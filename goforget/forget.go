@@ -18,6 +18,7 @@ var (
 	showVersion      = flag.Bool("version", false, "print version string")
 	httpAddress      = flag.String("http", ":8080", "HTTP service address (e.g., ':8080')")
 	redisHost        = flag.String("redis-host", "", "Redis host in the form host:port:db.")
+	redisUri         = flag.String("redis-uri", "", "Redis URI in the form redis://:password@hostname:port/db_number")
 	defaultRate      = flag.Float64("default-rate", 0.5, "Default rate to decay distributions with")
 	nWorkers         = flag.Int("nworkers", 1, "Number of update workers that update the redis DB")
 	UpdateOutputTime = flag.Int("status-time", 60, "Time in seconds between redis update status output")
@@ -163,6 +164,7 @@ func DBSizeHandler(w http.ResponseWriter, r *http.Request) {
 	size, err := DBSize()
 	if err != nil {
 		HttpError(w, 500, "COULD_NOT_READ_SIZE")
+		return
 	}
 	HttpResponse(w, 200, size/3)
 }
@@ -232,6 +234,18 @@ func main() {
 
 	rand.Seed(time.Now().UnixNano())
 	redisServer = NewRedisServer(*redisHost, *nWorkers*2)
+	if *redisUri != "" {
+		// if a redis URI exists was specified, parse it
+		redisServer = NewRedisServerFromUri(*redisUri)
+	} else if *redisHost != "" {
+		// for legacy mode
+		redisServer = NewRedisServerFromRaw(*redisHost)
+	} else {
+		redisServer = NewRedisServerFromUri("redis://localhost:6379/1")
+	}
+
+	// create the connection pool
+	redisServer.Connect(*nWorkers * 2)
 
 	log.Printf("Starting %d update worker(s)", *nWorkers)
 	workerWaitGroup := sync.WaitGroup{}
